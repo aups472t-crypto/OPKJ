@@ -1,0 +1,158 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "Delta Custom Pack (1-3)",
+   LoadingTitle = "กำลังโหลดสคริปต์...",
+   LoadingSubtitle = "Noclip | Invisible | NPC Stun",
+   ConfigurationSaving = { Enabled = false }
+})
+
+local MainTab = Window:CreateTab("ระบบหลัก", 4483362458)
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+
+-- ตัวแปรควบคุมสถานะ
+local NoclipEnabled = false
+local InvisibleEnabled = false
+local NpcStunEnabled = false
+local StunRadius = 25 -- ระยะเริ่มต้น (ปรับได้ 1-100)
+local SavedTransparency = {}
+local StunnedModels = {}
+
+-- ==========================================
+-- 1. ระบบทะลุกำแพง (Noclip)
+-- ==========================================
+RunService.Stepped:Connect(function()
+    if NoclipEnabled then
+        local char = LocalPlayer.Character
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end
+end)
+
+MainTab:CreateToggle({
+   Name = "1. ทะลุกำแพง (Noclip)",
+   CurrentValue = false,
+   Callback = function(Value)
+       NoclipEnabled = Value
+       -- คืนค่า CanCollide เมื่อปิด
+       if not Value and LocalPlayer.Character then
+           for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+               if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                   part.CanCollide = true
+               end
+           end
+       end
+   end,
+})
+
+-- ==========================================
+-- 2. ระบบล่องหน (Invisible)
+-- ==========================================
+local function setCharacterInvisible(state)
+    local char = LocalPlayer.Character
+    if not char then return end
+
+    if state then
+        SavedTransparency = {}
+        for _, obj in ipairs(char:GetDescendants()) do
+            if obj:IsA("BasePart") or obj:IsA("Decal") then
+                if obj.Name ~= "HumanoidRootPart" then
+                    SavedTransparency[obj] = obj.Transparency
+                    obj.Transparency = 1
+                end
+            elseif obj:IsA("ParticleEmitter") or obj:IsA("Beam") or obj:IsA("Trail") then
+                obj.Enabled = false
+            end
+        end
+    else
+        for obj, oldTrans in pairs(SavedTransparency) do
+            if obj and obj.Parent then
+                obj.Transparency = oldTrans
+            end
+        end
+        SavedTransparency = {}
+        for _, obj in ipairs(char:GetDescendants()) do
+            if obj:IsA("ParticleEmitter") or obj:IsA("Beam") or obj:IsA("Trail") then
+                obj.Enabled = true
+            end
+        end
+    end
+end
+
+MainTab:CreateToggle({
+   Name = "2. ล่องหน (Invisible)",
+   CurrentValue = false,
+   Callback = function(Value)
+       InvisibleEnabled = Value
+       setCharacterInvisible(Value)
+   end,
+})
+
+-- กันตัวละครเกิดใหม่แล้วล่องหนหลุด
+LocalPlayer.CharacterAdded:Connect(function(char)
+    char:WaitForChild("HumanoidRootPart")
+    task.wait(0.3)
+    if InvisibleEnabled then
+        setCharacterInvisible(true)
+    end
+end)
+
+-- ==========================================
+-- 3. ถ้า NPC เข้าใกล้ในระยะ 1-100 เมตร จะหยุด/สตั๊นชั่วคราว
+-- ==========================================
+MainTab:CreateSlider({
+   Name = "ระยะตรวจจับ NPC (เมตร)",
+   Range = {1, 100},
+   Increment = 1,
+   Suffix = "m",
+   CurrentValue = 25,
+   Callback = function(Value)
+       StunRadius = Value
+   end,
+})
+
+MainTab:CreateToggle({
+   Name = "3. NPC เข้าใกล้ระยะกำหนดแล้วหยุด/สตั๊น",
+   CurrentValue = false,
+   Callback = function(Value)
+       NpcStunEnabled = Value
+   end,
+})
+
+task.spawn(function()
+    while task.wait(0.2) do
+        if NpcStunEnabled then
+            pcall(function()
+                local char = LocalPlayer.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if not hrp then return end
+
+                -- ค้นหาโมเดลที่มี Humanoid แต่ไม่ใช่ผู้เล่นจริง
+                for _, model in ipairs(Workspace:GetDescendants()) do
+                    if model:IsA("Model") and not Players:GetPlayerFromCharacter(model) then
+                        local hum = model:FindFirstChildOfClass("Humanoid")
+                        local npcRoot = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+                        if hum and npcRoot and hum.Health > 0 then
+                            local dist = (npcRoot.Position - hrp.Position).Magnitude
+                            if dist <= StunRadius then
+                                hum.WalkSpeed = 0
+                                hum.JumpPower = 0
+                                npcRoot.Anchored = true
+                                StunnedModels[model] = true
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
